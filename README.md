@@ -1,0 +1,2 @@
+# Nordic
+Nordic cup firmware

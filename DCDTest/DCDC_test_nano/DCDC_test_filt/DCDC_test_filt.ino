@@ -17,6 +17,15 @@ IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_NeoPixel.h>
+#ifdef __AVR__
+  #include <avr/power.h>
+#endif
+
+//LED Globals
+#define LED_PIN 3
+#define NUMPIXELS 5
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 //Temperature Sensor Globals
 OneWire  ds(2);  // on pin 2 (a 4.7K resistor is necessary)
@@ -92,6 +101,8 @@ void setup()
     Serial.println(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
   }
+
+  pixels.begin();
   
 }
  
@@ -155,6 +166,7 @@ void loop()
   {
     display.clearDisplay();
     displayText("Temp: ", celsius, 0);
+    fanActuate(celsius);
     displayText("Desired: ", desiredTemp, 10);
     displayText("Current: ", Amps, 20);
     displayMillis = millis();
@@ -287,3 +299,23 @@ void setPwmFrequency(int pin, int divisor) {
     TCCR2B = TCCR2B & 0b11111000 | mode;
   }
 }
+
+
+void showLEDColour(float celsius){
+  for(int i=0;i<NUMPIXELS;i++){
+    pixels.setPixelColor(i, pixels.Color(0,150,0)); // Moderately bright green color.
+    pixels.show();
+  }
+}
+
+void fanActuate(float celsius){
+  if(celsius > 25)
+  {
+    digitalWrite(4, HIGH);
+  }
+  else
+  {
+    digitalWrite(4, LOW);
+  }
+}
+

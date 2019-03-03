@@ -70,6 +70,16 @@ int LPWM_Output = 6;
 int RPWM_En = 22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
 int LPWM_En = 23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
 
+unsigned long displayMillis = millis();
+
+unsigned long convertMAX31920Time = millis();
+bool convertTempFromMAX31820 = true;
+bool waitConvertMAX31820Delay = false;
+bool readScratchpadFromMAX31820 = false;
+
+float potValue;
+float desiredTemp;
+
 void setPwmFrequency(int pin, int divisor) {
   byte mode;
   if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
@@ -122,11 +132,11 @@ void setup()
 void loop()
 {
 
-  byte data[12];
+  //byte data[12];
   byte addr[8];
-  float celsius;
-  float potValue;
-  float desiredTemp;
+  //float celsius;
+  //float potValue;
+  //float desiredTemp;
   int sensorValue = analogRead(SENSOR_PIN);
  
   // sensor value is in the range 0 to 1023
@@ -157,22 +167,26 @@ void loop()
   Serial.print("\n");
 
   //check if the temperature sensor is on the one wire line
+  ds.search(addr);
+  /*
   checkForAddresses(addr);
   if (OneWire::crc8(addr, 7) != addr[7]) {
       Serial.println("CRC is not valid!");
       return;
   }
   Serial.println();
+  */
 
   //read temperature data and convert to current temperature
   obtainTempData(addr);
-  saveTempData(data);
-  celsius = convertTempData_HumanReadable(data);
+  //saveTempData(data);
+  //celsius = convertTempData_HumanReadable(data);
 
   //read the potentiometer value and convert to a desired temperature
   potValue = analogRead(POT_PIN);
   desiredTemp = potValue/1023*60 + 10;
 
+  //read the current sensor value and convert to current 
   RawValue = analogRead(CURRENT_PIN);
   Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
   Amps = ((Voltage - ACSoffset) / mVperAmp);
@@ -181,12 +195,15 @@ void loop()
   Serial.print(celsius);
   Serial.print(" Celsius, ");
 
-  display.clearDisplay();
-
-  displayText("Temp: ", celsius, 0);
-  displayText("Desired: ", desiredTemp, 10);
-  displayText("Current: ", Amps, 20);
-  delay(100);
+  if ((millis() - displayMillis) > 1000)
+  {
+    display.clearDisplay();
+    displayText("Temp: ", celsius, 0);
+    displayText("Desired: ", desiredTemp, 10);
+    displayText("Current: ", Amps, 20);
+    displayMillis = millis();
+    Serial.print(displayMillis);
+  }
   
 }
 
@@ -214,17 +231,53 @@ void checkForAddresses(byte *addr) {
 }
 
 void obtainTempData(byte *addr) {
-  byte present = 0;
+  byte data[12];
+
+  if (convertTempFromMAX31820 == true)
+  {
+      //byte present = 0;
+      
+      ds.reset();
+      ds.select(addr);
+      ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
+    
+      //delay(1000);           // maybe 750ms is enough, maybe not
+    
+      //present = ds.reset();
+      //ds.select(addr);    
+      //ds.write(0xBE);         // Read Scratchpad
+
+      convertTempFromMAX31820 = false;
+      waitConvertMAX31820Delay = true;
+      convertMAX31920Time = millis();
+      Serial.println("ONE");
+  }
+  else if (waitConvertMAX31820Delay ==  true and (millis() - convertMAX31920Time) > 1000)
+  {
+      waitConvertMAX31820Delay = false;
+      readScratchpadFromMAX31820 = true;  
+      Serial.println("TWO");
+  }
+  else if (readScratchpadFromMAX31820 == true)
+  {
+      byte present = 0;
+      present = ds.reset();
+      ds.select(addr);    
+      ds.write(0xBE);         // Read Scratchpad
+
+      readScratchpadFromMAX31820 = false; 
+      convertTempFromMAX31820 = true; 
+
+      Serial.println("THREE");
+      saveTempData(data);
+      celsius = convertTempData_HumanReadable(data);
+      //displayText("Temp: ", celsius, 0);
+  }
+  else{
+      Serial.println("WAIT");
+      Serial.println(millis() - convertMAX31920Time);
+  }
   
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
-
-  delay(1000);           // maybe 750ms is enough, maybe not
-
-  present = ds.reset();
-  ds.select(addr);    
-  ds.write(0xBE);         // Read Scratchpad
 }
 
 void saveTempData(byte *data) {

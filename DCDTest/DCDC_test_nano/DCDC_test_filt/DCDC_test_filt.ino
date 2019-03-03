@@ -12,12 +12,64 @@ IBT-2 pin 8 (GND) to Arduino GND
 IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
 */
 
+#include <OneWire.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+OneWire  ds(2);  // on pin 2 (a 4.7K resistor is necessary)
+float celsius = 0;
+
+#define CURRENT_PIN A1
+
+// Set your scale factor
+int mVperAmp = 40; // See Scale Factors Below
+// Set you Offset
+int ACSoffset = 2500; // See offsets below
+int RawValue= 0;
+double Voltage = 0;
+double Amps = 0;
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define OLED_MOSI   9
+#define OLED_CLK   10
+#define OLED_DC    7    // Used to be Pin 11 but Pin 11 is now used by LPWM_Output
+#define OLED_CS    12
+#define OLED_RESET 13
+
+#define POT_PIN    5
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT,
+  OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+
+static const unsigned char PROGMEM logo_bmp[] =
+{ B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000 };
+
 int SENSOR_PIN = 0; // center pin of the potentiometer
  
-int RPWM_Output = 5; // Arduino PWM output pin 5; connect to IBT-2 pin 1 (RPWM)
-int LPWM_Output = 6; // Arduino PWM output pin 6; connect to IBT-2 pin 2 (LPWM)
+int RPWM_Output = 5;  
+int LPWM_Output = 6; 
 int RPWM_En = 22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
 int LPWM_En = 23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
+
 void setPwmFrequency(int pin, int divisor) {
   byte mode;
   if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
@@ -59,10 +111,22 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   setPwmFrequency(RPWM_Output, 8);
   setPwmFrequency(LPWM_Output, 8);
+
+  if(!display.begin(SSD1306_SWITCHCAPVCC)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+  
 }
  
 void loop()
 {
+
+  byte data[12];
+  byte addr[8];
+  float celsius;
+  float potValue;
+  float desiredTemp;
   int sensorValue = analogRead(SENSOR_PIN);
  
   // sensor value is in the range 0 to 1023
@@ -76,7 +140,7 @@ void loop()
     digitalWrite(LPWM_En, LOW);
     analogWrite(LPWM_Output, 0);
     analogWrite(RPWM_Output, reversePWM);
-    digitalWrite(LED_BUILTIN, HIGH);
+    //digitalWrite(LED_BUILTIN, HIGH);
   }
   else
   {
@@ -87,8 +151,108 @@ void loop()
     digitalWrite(LPWM_En, HIGH);
     analogWrite(LPWM_Output, forwardPWM);
     analogWrite(RPWM_Output, 0);
-    digitalWrite(LED_BUILTIN, LOW);
+    //digitalWrite(LED_BUILTIN, LOW);
   }
   Serial.print(sensorValue, DEC);
   Serial.print("\n");
+
+  //check if the temperature sensor is on the one wire line
+  checkForAddresses(addr);
+  if (OneWire::crc8(addr, 7) != addr[7]) {
+      Serial.println("CRC is not valid!");
+      return;
+  }
+  Serial.println();
+
+  //read temperature data and convert to current temperature
+  obtainTempData(addr);
+  saveTempData(data);
+  celsius = convertTempData_HumanReadable(data);
+
+  //read the potentiometer value and convert to a desired temperature
+  potValue = analogRead(POT_PIN);
+  desiredTemp = potValue/1023*60 + 10;
+
+  RawValue = analogRead(CURRENT_PIN);
+  Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
+  Amps = ((Voltage - ACSoffset) / mVperAmp);
+
+  Serial.print("  Temperature = ");
+  Serial.print(celsius);
+  Serial.print(" Celsius, ");
+
+  display.clearDisplay();
+
+  displayText("Temp: ", celsius, 0);
+  displayText("Desired: ", desiredTemp, 10);
+  displayText("Current: ", Amps, 20);
+  delay(100);
+  
+}
+
+void displayText(char *descriptor, float value, int cursorY) {
+
+  display.setTextSize(1.5); // Draw 2X-scale text
+  display.setTextColor(WHITE);
+  display.setCursor(10, cursorY);
+  
+  display.print(descriptor);
+  display.print(value);
+  
+  display.display();      // Show initial text
+ 
+}
+
+void checkForAddresses(byte *addr) {
+    while ( !ds.search(addr)) {
+      Serial.println("No more addresses.");
+      Serial.println();
+      ds.reset_search();
+      delay(250);
+    }
+    return;
+}
+
+void obtainTempData(byte *addr) {
+  byte present = 0;
+  
+  ds.reset();
+  ds.select(addr);
+  ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
+
+  delay(1000);           // maybe 750ms is enough, maybe not
+
+  present = ds.reset();
+  ds.select(addr);    
+  ds.write(0xBE);         // Read Scratchpad
+}
+
+void saveTempData(byte *data) {
+  for ( byte i = 0; i < 9; i++) {           // we need 9 bytes
+    data[i] = ds.read();
+  }  
+}
+
+float convertTempData_HumanReadable(byte *data) {
+  byte type_s;
+
+  
+  // Convert the data to actual temperature
+  int16_t raw = (data[1] << 8) | data[0];
+  if (type_s) {
+    raw = raw << 3; // 9 bit resolution default
+    if (data[7] == 0x10) {
+      // "count remain" gives full 12 bit resolution
+      raw = (raw & 0xFFF0) + 12 - data[6];
+    }
+  } else {
+    byte cfg = (data[4] & 0x60);
+    // at lower res, the low bits are undefined, so let's zero them
+    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
+    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
+    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
+    //// default is 12 bit resolution, 750 ms conversion time
+  }
+  float celsius = (float)raw / 16.0;
+  return celsius;
 }

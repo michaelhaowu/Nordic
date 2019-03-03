@@ -18,19 +18,33 @@ IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+//Temperature Sensor Globals
 OneWire  ds(2);  // on pin 2 (a 4.7K resistor is necessary)
 float celsius = 0;
+unsigned long convertMAX31920Time = millis();
+bool convertTempFromMAX31820 = true;
+bool waitConvertMAX31820Delay = false;
+bool readScratchpadFromMAX31820 = false;
 
+//Current Sensor Globals
 #define CURRENT_PIN A1
-
-// Set your scale factor
-int mVperAmp = 40; // See Scale Factors Below
-// Set you Offset
-int ACSoffset = 2500; // See offsets below
+int mVperAmp = 40; // Current Sensor Scale Value
+int ACSoffset = 2500; // Current Sensor Offset
 int RawValue= 0;
 double Voltage = 0;
 double Amps = 0;
 
+//Desired Temperature Set Potentiometer Globals
+#define POT_PIN    5
+int SENSOR_PIN = 0; // center pin of the potentiometer
+float potValue;
+float desiredTemp;
+int RPWM_Output = 5;  
+int LPWM_Output = 6; 
+int RPWM_En = 22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
+int LPWM_En = 23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
+
+//Display Globals
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
@@ -39,8 +53,6 @@ double Amps = 0;
 #define OLED_DC    7    // Used to be Pin 11 but Pin 11 is now used by LPWM_Output
 #define OLED_CS    12
 #define OLED_RESET 13
-
-#define POT_PIN    5
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT,
   OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
@@ -63,53 +75,7 @@ static const unsigned char PROGMEM logo_bmp[] =
   B01110000, B01110000,
   B00000000, B00110000 };
 
-int SENSOR_PIN = 0; // center pin of the potentiometer
- 
-int RPWM_Output = 5;  
-int LPWM_Output = 6; 
-int RPWM_En = 22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
-int LPWM_En = 23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
-
 unsigned long displayMillis = millis();
-
-unsigned long convertMAX31920Time = millis();
-bool convertTempFromMAX31820 = true;
-bool waitConvertMAX31820Delay = false;
-bool readScratchpadFromMAX31820 = false;
-
-float potValue;
-float desiredTemp;
-
-void setPwmFrequency(int pin, int divisor) {
-  byte mode;
-  if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
-    switch(divisor) {
-      case 1: mode = 0x01; break;
-      case 8: mode = 0x02; break;
-      case 64: mode = 0x03; break;
-      case 256: mode = 0x04; break;
-      case 1024: mode = 0x05; break;
-      default: return;
-    }
-    if(pin == 5 || pin == 6) {
-      TCCR0B = TCCR0B & 0b11111000 | mode;
-    } else {
-      TCCR1B = TCCR1B & 0b11111000 | mode;
-    }
-  } else if(pin == 3 || pin == 11) {
-    switch(divisor) {
-      case 1: mode = 0x01; break;
-      case 8: mode = 0x02; break;
-      case 32: mode = 0x03; break;
-      case 64: mode = 0x04; break;
-      case 128: mode = 0x05; break;
-      case 256: mode = 0x06; break;
-      case 1024: mode = 0x07; break;
-      default: return;
-    }
-    TCCR2B = TCCR2B & 0b11111000 | mode;
-  }
-}
 
 void setup()
 {
@@ -131,12 +97,8 @@ void setup()
  
 void loop()
 {
-
-  //byte data[12];
+  
   byte addr[8];
-  //float celsius;
-  //float potValue;
-  //float desiredTemp;
   int sensorValue = analogRead(SENSOR_PIN);
  
   // sensor value is in the range 0 to 1023
@@ -179,8 +141,6 @@ void loop()
 
   //read temperature data and convert to current temperature
   obtainTempData(addr);
-  //saveTempData(data);
-  //celsius = convertTempData_HumanReadable(data);
 
   //read the potentiometer value and convert to a desired temperature
   potValue = analogRead(POT_PIN);
@@ -191,10 +151,6 @@ void loop()
   Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
   Amps = ((Voltage - ACSoffset) / mVperAmp);
 
-  Serial.print("  Temperature = ");
-  Serial.print(celsius);
-  Serial.print(" Celsius, ");
-
   if ((millis() - displayMillis) > 1000)
   {
     display.clearDisplay();
@@ -202,7 +158,6 @@ void loop()
     displayText("Desired: ", desiredTemp, 10);
     displayText("Current: ", Amps, 20);
     displayMillis = millis();
-    Serial.print(displayMillis);
   }
   
 }
@@ -235,17 +190,10 @@ void obtainTempData(byte *addr) {
 
   if (convertTempFromMAX31820 == true)
   {
-      //byte present = 0;
       
       ds.reset();
       ds.select(addr);
       ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
-    
-      //delay(1000);           // maybe 750ms is enough, maybe not
-    
-      //present = ds.reset();
-      //ds.select(addr);    
-      //ds.write(0xBE);         // Read Scratchpad
 
       convertTempFromMAX31820 = false;
       waitConvertMAX31820Delay = true;
@@ -268,14 +216,12 @@ void obtainTempData(byte *addr) {
       readScratchpadFromMAX31820 = false; 
       convertTempFromMAX31820 = true; 
 
-      Serial.println("THREE");
       saveTempData(data);
       celsius = convertTempData_HumanReadable(data);
-      //displayText("Temp: ", celsius, 0);
+ 
   }
   else{
-      Serial.println("WAIT");
-      Serial.println(millis() - convertMAX31920Time);
+
   }
   
 }
@@ -308,4 +254,36 @@ float convertTempData_HumanReadable(byte *data) {
   }
   float celsius = (float)raw / 16.0;
   return celsius;
+}
+
+
+void setPwmFrequency(int pin, int divisor) {
+  byte mode;
+  if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
+    switch(divisor) {
+      case 1: mode = 0x01; break;
+      case 8: mode = 0x02; break;
+      case 64: mode = 0x03; break;
+      case 256: mode = 0x04; break;
+      case 1024: mode = 0x05; break;
+      default: return;
+    }
+    if(pin == 5 || pin == 6) {
+      TCCR0B = TCCR0B & 0b11111000 | mode;
+    } else {
+      TCCR1B = TCCR1B & 0b11111000 | mode;
+    }
+  } else if(pin == 3 || pin == 11) {
+    switch(divisor) {
+      case 1: mode = 0x01; break;
+      case 8: mode = 0x02; break;
+      case 32: mode = 0x03; break;
+      case 64: mode = 0x04; break;
+      case 128: mode = 0x05; break;
+      case 256: mode = 0x06; break;
+      case 1024: mode = 0x07; break;
+      default: return;
+    }
+    TCCR2B = TCCR2B & 0b11111000 | mode;
+  }
 }

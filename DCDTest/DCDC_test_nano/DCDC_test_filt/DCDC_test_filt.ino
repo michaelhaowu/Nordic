@@ -12,7 +12,13 @@ IBT-2 pin 8 (GND) to Arduino GND
 IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
 */
 
-int SENSOR_PIN = 0; // center pin of the potentiometer
+const int SENSOR_PIN = 0; // center pin of the potentiometer
+const int analogIn = 1;
+int mVperAmp = 40;
+int RawValue= 0;
+double Voltage = 0;
+double Amps = 0;
+int ACSoffset = 2500;
  
 int RPWM_Output = 5; // Arduino PWM output pin 5; connect to IBT-2 pin 1 (RPWM)
 int LPWM_Output = 6; // Arduino PWM output pin 6; connect to IBT-2 pin 2 (LPWM)
@@ -63,14 +69,31 @@ void setup()
  
 void loop()
 {
+  RawValue = analogRead(analogIn);
+  Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
+  Amps = ((Voltage - ACSoffset) / mVperAmp); //
+
+  delay(10);
+
+  Serial.print("\t Amps = "); // shows the voltage measured 
+  Serial.println(Amps,3); // the '3' after voltage allows you to display 3 digits after decimal point
+  //Serial.print("\t Raw = ");
+  //Serial.println(RawValue,3);
   int sensorValue = analogRead(SENSOR_PIN);
+
+  sensorValue = sensorValue < 40 ? 40 : sensorValue;
+  sensorValue = sensorValue > 960 ? 960 : sensorValue;
+
+  sensorValue = abs(sensorValue - 500) < 5 ? 500 : sensorValue;
  
   // sensor value is in the range 0 to 1023
   // the lower half of it we use for reverse rotation; the upper half for forward rotation
-  if (sensorValue < 512)
+  if (sensorValue < (500))
   {
     // reverse rotation
-    unsigned int reversePWM = (511 - sensorValue) / 2;  
+    int reversePWM = (500  - sensorValue)*(255.0 / 460.0); 
+    //Serial.print(reversePWM, DEC);
+    //Serial.print("     ");
     //int reversePWM = 255;
     digitalWrite(RPWM_En, HIGH);
     digitalWrite(LPWM_En, LOW);
@@ -81,7 +104,9 @@ void loop()
   else
   {
     // forward rotation
-    unsigned int forwardPWM = (sensorValue - 512) / 2;
+    unsigned int forwardPWM = (sensorValue - 500)*(255.0 / 460.0);
+    //Serial.print(forwardPWM, DEC);
+    //Serial.print("     ");
     //int forwardPWM = 255;
     digitalWrite(RPWM_En, LOW);
     digitalWrite(LPWM_En, HIGH);
@@ -89,6 +114,6 @@ void loop()
     analogWrite(RPWM_Output, 0);
     digitalWrite(LED_BUILTIN, LOW);
   }
-  Serial.print(sensorValue, DEC);
-  Serial.print("\n");
+  //Serial.print(sensorValue, DEC);
+  //Serial.print("\n");
 }

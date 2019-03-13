@@ -13,6 +13,7 @@ IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
 */
 
 #include <OneWire.h>
+#include <DallasTemperature.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -22,18 +23,14 @@ IBT-2 pins 5 (R_IS) and 6 (L_IS) not connected
   #include <avr/power.h>
 #endif
 
-//LED Globals
-#define LED_PIN 3
-#define NUMPIXELS 5
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-//Temperature Sensor Globals
-OneWire  ds(2);  // on pin 2 (a 4.7K resistor is necessary)
-float celsius = 0;
-unsigned long convertMAX31920Time = millis();
-bool convertTempFromMAX31820 = true;
-bool waitConvertMAX31820Delay = false;
-bool readScratchpadFromMAX31820 = false;
+//Peltier Temperature Sensor Globals and Water Temperature Sensor Globals
+#define ALL_PELT_TEMP_PIN 2
+OneWire  oneWire(ALL_PELT_TEMP_PIN);  // on pin 2 (a 4.7K resistor is necessary)
+DallasTemperature tempSensors(&oneWire);
+float tempHotPeltier = 0;
+float tempColdPeltier = 0;
+float waterTemp = 0;
 
 //Current Sensor Globals
 #define CURRENT_PIN A7
@@ -43,9 +40,12 @@ int RawValue= 0;
 double Voltage = 0;
 double Amps = 0;
 
+#define VOLTAGE_PIN 11
+float batteryVoltage = 0;
+
 //Desired Temperature Set Potentiometer Globals
 //#define POT_PIN    5
-int SENSOR_PIN = 0; // center pin of the potentiometer
+int POT_PIN = 0; // center pin of the potentiometer
 float potValue;
 float desiredTemp;
 int RPWM_Output = 5;  
@@ -86,6 +86,9 @@ static const unsigned char PROGMEM logo_bmp[] =
 
 unsigned long displayMillis = millis();
 
+#define FAN_PIN 4
+float fanOnTrigger = 25;
+
 void setup()
 {
   Serial.begin(9600);
@@ -102,15 +105,14 @@ void setup()
     for(;;); // Don't proceed, loop forever
   }
 
-  pixels.begin();
-  
+  tempSensors.begin();
+
 }
  
 void loop()
 {
   
-  byte addr[8];
-  float sensorValue = analogRead(SENSOR_PIN);
+  float sensorValue = analogRead(POT_PIN);
   Serial.println("Potentiometer");
   Serial.println(sensorValue);
  
@@ -145,19 +147,11 @@ void loop()
   //Serial.print(sensorValue, DEC);
   //Serial.print("\n");
 
-  //check if the temperature sensor is on the one wire line
-  ds.search(addr);
-  /*
-  checkForAddresses(addr);
-  if (OneWire::crc8(addr, 7) != addr[7]) {
-      Serial.println("CRC is not valid!");
-      return;
-  }
-  Serial.println();
-  */
-
-  //read temperature data and convert to current temperature
-  obtainTempData(addr);
+  // Send the command to get temperatures
+  tempSensors.requestTemperatures();
+  tempHotPeltier = tempSensors.getTempCByIndex(0);
+  tempColdPeltier = tempSensors.getTempCByIndex(1);
+  waterTemp = tempSensors.getTempCByIndex(2);
 
   //read the potentiometer value and convert to a desired temperature
   //potValue = analogRead(POT_PIN);
@@ -168,17 +162,25 @@ void loop()
   Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
   Amps = ((Voltage - ACSoffset) / mVperAmp);
 
+  if (Amps > 0)
+    fanActuate(tempColdPeltier);
+  else
+    fanActuate(tempHotPeltier);
+  
+  //read the voltage sensor value and convert to current 
+  batteryVoltage = digitalRead(VOLTAGE_PIN);
+
   if ((millis() - displayMillis) > 10000)
   {
     display.clearDisplay();
-    displayText("Temp: ", celsius, 0);
-    fanActuate(celsius);
-    displayText("Desired: ", desiredTemp, 10);
-    displayText("Current: ", Amps, 20);
+    displayText("Hot Temp: ", tempHotPeltier, 0);
+    displayText("Cold Temp: ", tempColdPeltier, 10);
+    displayText("Water Temp: ", waterTemp, 20);
+    displayText("Desired: ", desiredTemp, 30);
+    displayText("Current: ", Amps, 40);
+    displayText("Voltage: ", batteryVoltage, 50); 
     displayMillis = millis();
   }
-
-  showLEDColour(celsius);
   
 }
 
@@ -194,90 +196,6 @@ void displayText(char *descriptor, float value, int cursorY) {
   display.display();      // Show initial text
  
 }
-
-void checkForAddresses(byte *addr) {
-    while ( !ds.search(addr)) {
-      Serial.println("No more addresses.");
-      Serial.println();
-      ds.reset_search();
-      delay(250);
-    }
-    return;
-}
-
-void obtainTempData(byte *addr) {
-  byte data[12];
-
-  if (convertTempFromMAX31820 == true)
-  {
-      
-      ds.reset();
-      ds.select(addr);
-      ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
-
-      convertTempFromMAX31820 = false;
-      waitConvertMAX31820Delay = true;
-      convertMAX31920Time = millis();
-      Serial.println("ONE");
-  }
-  else if (waitConvertMAX31820Delay ==  true and (millis() - convertMAX31920Time) > 1000)
-  {
-      waitConvertMAX31820Delay = false;
-      readScratchpadFromMAX31820 = true;  
-      Serial.println("TWO");
-  }
-  else if (readScratchpadFromMAX31820 == true)
-  {
-      byte present = 0;
-      present = ds.reset();
-      ds.select(addr);    
-      ds.write(0xBE);         // Read Scratchpad
-
-      readScratchpadFromMAX31820 = false; 
-      convertTempFromMAX31820 = true; 
-
-      saveTempData(data);
-      celsius = convertTempData_HumanReadable(data);
-
-      Serial.println("THREE");
- 
-  }
-  else{
-
-  }
-  
-}
-
-void saveTempData(byte *data) {
-  for ( byte i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-  }  
-}
-
-float convertTempData_HumanReadable(byte *data) {
-  byte type_s;
-
-  
-  // Convert the data to actual temperature
-  int16_t raw = (data[1] << 8) | data[0];
-  if (type_s) {
-    raw = raw << 3; // 9 bit resolution default
-    if (data[7] == 0x10) {
-      // "count remain" gives full 12 bit resolution
-      raw = (raw & 0xFFF0) + 12 - data[6];
-    }
-  } else {
-    byte cfg = (data[4] & 0x60);
-    // at lower res, the low bits are undefined, so let's zero them
-    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-    //// default is 12 bit resolution, 750 ms conversion time
-  }
-  float celsius = (float)raw / 16.0;
-  return celsius;
-}
-
 
 void setPwmFrequency(int pin, int divisor) {
   byte mode;
@@ -310,22 +228,14 @@ void setPwmFrequency(int pin, int divisor) {
   }
 }
 
-
-void showLEDColour(float celsius){
-  for(int i=0;i<NUMPIXELS;i++){
-    pixels.setPixelColor(i, pixels.Color(0,150,0)); // Moderately bright green color.
-    pixels.show();
-  }
-}
-
 void fanActuate(float celsius){
-  if(celsius > 25)
+  if(celsius > fanOnTrigger)
   {
-    digitalWrite(4, HIGH);
+    digitalWrite(FAN_PIN, HIGH);
   }
   else
   {
-    digitalWrite(4, LOW);
+    digitalWrite(FAN_PIN, LOW);
   }
 }
 

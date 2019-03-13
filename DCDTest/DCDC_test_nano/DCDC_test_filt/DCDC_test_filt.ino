@@ -36,7 +36,7 @@ bool waitConvertMAX31820Delay = false;
 bool readScratchpadFromMAX31820 = false;
 
 //Current Sensor Globals
-#define CURRENT_PIN A1
+#define CURRENT_PIN A7
 int mVperAmp = 40; // Current Sensor Scale Value
 int ACSoffset = 2500; // Current Sensor Offset
 int RawValue= 0;
@@ -44,14 +44,14 @@ double Voltage = 0;
 double Amps = 0;
 
 //Desired Temperature Set Potentiometer Globals
-#define POT_PIN    5
+//#define POT_PIN    5
 int SENSOR_PIN = 0; // center pin of the potentiometer
 float potValue;
 float desiredTemp;
 int RPWM_Output = 5;  
 int LPWM_Output = 6; 
-int RPWM_En = 22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
-int LPWM_En = 23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
+int RPWM_En = 11; //22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
+int LPWM_En = 11; //23; // Arduino PWM output pin 9; connect to IBT-2 pin 4 (L_EN)
 
 //Display Globals
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -110,34 +110,40 @@ void loop()
 {
   
   byte addr[8];
-  int sensorValue = analogRead(SENSOR_PIN);
+  float sensorValue = analogRead(SENSOR_PIN);
+  Serial.println("Potentiometer");
+  Serial.println(sensorValue);
  
   // sensor value is in the range 0 to 1023
   // the lower half of it we use for reverse rotation; the upper half for forward rotation
   if (sensorValue < 512)
   {
     // reverse rotation
-    unsigned int reversePWM = (511 - sensorValue) / 2;  
+    unsigned int reversePWM = (500  - sensorValue)*(255.0 / 460.0); //(511 - sensorValue) / 2;  
     //int reversePWM = 255;
     digitalWrite(RPWM_En, HIGH);
-    digitalWrite(LPWM_En, LOW);
+    //digitalWrite(LPWM_En, LOW);
     analogWrite(LPWM_Output, 0);
     analogWrite(RPWM_Output, reversePWM);
     //digitalWrite(LED_BUILTIN, HIGH);
+    Serial.print("Reverse PWM: ");
+    Serial.println(reversePWM);
   }
   else
   {
     // forward rotation
-    unsigned int forwardPWM = (sensorValue - 512) / 2;
+    unsigned int forwardPWM = (sensorValue - 500)*(255.0 / 460.0);//(sensorValue - 512) / 2;
     //int forwardPWM = 255;
-    digitalWrite(RPWM_En, LOW);
+    //digitalWrite(RPWM_En, LOW);
     digitalWrite(LPWM_En, HIGH);
     analogWrite(LPWM_Output, forwardPWM);
     analogWrite(RPWM_Output, 0);
     //digitalWrite(LED_BUILTIN, LOW);
+    Serial.print("Forward PWM: ");
+    Serial.println(forwardPWM);
   }
-  Serial.print(sensorValue, DEC);
-  Serial.print("\n");
+  //Serial.print(sensorValue, DEC);
+  //Serial.print("\n");
 
   //check if the temperature sensor is on the one wire line
   ds.search(addr);
@@ -154,15 +160,15 @@ void loop()
   obtainTempData(addr);
 
   //read the potentiometer value and convert to a desired temperature
-  potValue = analogRead(POT_PIN);
-  desiredTemp = potValue/1023*60 + 10;
+  //potValue = analogRead(POT_PIN);
+  desiredTemp = sensorValue/1023*60 + 10;
 
   //read the current sensor value and convert to current 
   RawValue = analogRead(CURRENT_PIN);
   Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
   Amps = ((Voltage - ACSoffset) / mVperAmp);
 
-  if ((millis() - displayMillis) > 1000)
+  if ((millis() - displayMillis) > 10000)
   {
     display.clearDisplay();
     displayText("Temp: ", celsius, 0);
@@ -171,6 +177,8 @@ void loop()
     displayText("Current: ", Amps, 20);
     displayMillis = millis();
   }
+
+  showLEDColour(celsius);
   
 }
 
@@ -230,6 +238,8 @@ void obtainTempData(byte *addr) {
 
       saveTempData(data);
       celsius = convertTempData_HumanReadable(data);
+
+      Serial.println("THREE");
  
   }
   else{

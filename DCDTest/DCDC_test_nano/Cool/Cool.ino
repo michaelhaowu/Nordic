@@ -43,7 +43,7 @@ float batteryVoltage = 0;
 //#define POT_PIN    5
 int POT_PIN = A0; // center pin of the potentiometer
 float potValue;
-float desiredTemp;
+float desiredTemp = 55;
 int RPWM_Output = 5;  
 int LPWM_Output = 6; 
 int RLPWM_En = 11; //22; // Arduino PWM output pin 8; connect to IBT-2 pin 3 (R_EN)
@@ -112,6 +112,7 @@ void loop()
  
   // sensor value is in the range 0 to 1023
   // the lower half of it we use for reverse rotation; the upper half for forward rotation
+  /*
   if (sensorValue < 512)
   {
     // reverse rotation
@@ -134,6 +135,35 @@ void loop()
   }
   //Serial.print(sensorValue, DEC);
   //Serial.print("\n");
+  */
+
+  //COOLING
+  unsigned int reversePWM = (511 - sensorValue) / 2; 
+  digitalWrite(RLPWM_En, HIGH);
+
+  if(millis() < 1500)
+  {
+    reversePWM = 255*(millis()/1500)*(abs(cupTemperature - 55))/(55 - startTemperature);
+    Serial.println("Ramp");
+  }
+  else
+  
+    reversePWM = 255*(abs(cupTemperature - 55))/(55 - startTemperature);;
+    Serial.println("Ramp DONE");
+  }
+
+  if(abs(cupTemperature - 55) < 1) 
+  {
+  }
+  else if((cupTemperature - 55) > 1) //cool down
+  {
+    analogWrite(LPWM_Output, 0);
+    analogWrite(RPWM_Output, forwardPWM);
+  }
+  else{
+    analogWrite(LPWM_Output, forwardPWM);
+    analogWrite(RPWM_Output, 0);
+  }
 
   //read the potentiometer value and convert to a desired temperature
   //potValue = analogRead(POT_PIN);

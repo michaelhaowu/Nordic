@@ -30,9 +30,9 @@ float cupTemperature = 0;
 
 //Current Sensor Globals
 #define CURRENT_PIN A2
-int mVperAmp = 40; // Current Sensor Scale Value
+float mVperAmp = 40.0; // Current Sensor Scale Value
 int ACSoffset = 2500; // Current Sensor Offset
-int RawValue= 0;
+int RawValue = 0;
 double Voltage = 0;
 double Amps = 0;
 
@@ -90,8 +90,8 @@ void setup()
   pinMode(RPWM_Output, OUTPUT);
   pinMode(LPWM_Output, OUTPUT);
   pinMode(RLPWM_En, OUTPUT);
-  //setPwmFrequency(RPWM_Output, 8);
-  //setPwmFrequency(LPWM_Output, 8);
+  setPwmFrequency(RPWM_Output, 8);
+  setPwmFrequency(LPWM_Output, 8);
 
   if(!display.begin(SSD1306_SWITCHCAPVCC)) {
     Serial.println(F("SSD1306 allocation failed"));
@@ -99,14 +99,14 @@ void setup()
   }
 
   peltTemp.begin();
-  //cupTemp.begin();
+  cupTemp.begin();
 
 }
  
 void loop()
 {
   
-  float sensorValue = analogRead(POT_PIN)*2+512;
+  int sensorValue = analogRead(POT_PIN);
   //Serial.print("Potentiometer:  ");
   //Serial.println(sensorValue);
  
@@ -116,27 +116,21 @@ void loop()
   {
     // reverse rotation
     unsigned int reversePWM = (511 - sensorValue) / 2; 
-    //int reversePWM = 255;
     digitalWrite(RLPWM_En, HIGH);
-    //digitalWrite(LPWM_En, LOW);
     analogWrite(LPWM_Output, 0);
     analogWrite(RPWM_Output, reversePWM);
-    //digitalWrite(LED_BUILTIN, HIGH);
-    Serial.print("Reverse PWM: ");
-    Serial.println(reversePWM);
+    //Serial.print("Reverse PWM: ");
+    //Serial.println(reversePWM);
   }
   else
   {
     // forward rotation
-    int forwardPWM = (sensorValue - 512) / 2;
-    //int forwardPWM = 255;
-    //digitalWrite(RPWM_En, LOW);
+    unsigned int forwardPWM = (sensorValue - 512) / 2;
     digitalWrite(RLPWM_En, HIGH);
     analogWrite(LPWM_Output, forwardPWM);
     analogWrite(RPWM_Output, 0);
-    //digitalWrite(LED_BUILTIN, LOW);
-    Serial.print("Forward PWM: ");
-    Serial.println(forwardPWM);
+    //Serial.print("Forward PWM: ");
+    //Serial.println(forwardPWM);
   }
   //Serial.print(sensorValue, DEC);
   //Serial.print("\n");
@@ -147,11 +141,11 @@ void loop()
 
   //read the current sensor value and convert to current 
   RawValue = analogRead(CURRENT_PIN);
-  Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
-  Amps = ((Voltage - ACSoffset) / mVperAmp);
+  Voltage = ((RawValue-511) /511.0) * 2500; // Gets you mV
+  Amps = ((Voltage) / mVperAmp);
 
   //Serial.print("\t Amps = "); // shows the voltage measured 
-  //Serial.println(Amps,3); // the '3' after voltage allows you to display 3 digits after decimal point
+  //Serial.println(RawValue); // the '3' after voltage allows you to display 3 digits after decimal point
 
   if (Amps > 0)
     fanActuate(30);
@@ -159,9 +153,11 @@ void loop()
     fanActuate(30);
   
   //read the voltage sensor value and convert to current 
-  batteryVoltage = analogRead(VOLTAGE_PIN)*4;
+  batteryVoltage = analogRead(VOLTAGE_PIN)/1023.0*20;
+  Serial.print("Voltage = "); // shows the voltage measured 
+  Serial.println(batteryVoltage); // the '3' after voltage allows you to display 3 digits after decimal point
 
-  if ((millis() - displayMillis) > 1000)
+  if ((millis() - displayMillis) > 10000)
   {
     // Send the command to get temperatures
     peltTemp.requestTemperatures();
@@ -176,12 +172,11 @@ void loop()
     //Serial.println(cupTemperature, 4);
     
     display.clearDisplay();
-//    displayText("Hot Temp: ", tempHotPeltier, 0);
-//    displayText("Cold Temp: ", tempColdPeltier, 10);
-//    displayText("Water Temp: ", waterTemp, 20);
-//    displayText("Desired: ", desiredTemp, 30);
-//    displayText("Current: ", Amps, 40);
-//    displayText("Voltage: ", batteryVoltage, 50); 
+    displayText("Peltier Temp: ", peltTemperature, 0);
+    displayText("Water Temp: ", cupTemperature, 10);
+    displayText("Desired: ", desiredTemp, 20);
+    displayText("Current: ", Amps, 40);
+    displayText("Voltage: ", batteryVoltage, 50); 
     displayMillis = millis();
   }
 }
